@@ -24,18 +24,19 @@ class CNNModel(nn.Module):
     def __init__(self):
         super(CNNModel, self).__init__()
         self.conv1 = nn.Conv1d(in_channels=1, out_channels=16, kernel_size=3)
+        self.conv2 = nn.Conv1d(16, 32, kernel_size=3)
         self.pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(16, 64)
+        self.fc = nn.Linear(32, 32)  # <-- match shape from error logs
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = torch.relu(x)
+        x = torch.relu(self.conv1(x))
+        x = torch.relu(self.conv2(x))
         x = self.pool(x)
         x = x.view(x.size(0), -1)
         return self.fc(x)
 
 class FusionModel(nn.Module):
-    def __init__(self, input_dim=64*3, num_classes=2):
+    def __init__(self, input_dim=64 + 32 + 2, num_classes=2):
         super(FusionModel, self).__init__()
         self.fc1 = nn.Linear(input_dim, 64)
         self.fc2 = nn.Linear(64, num_classes)
