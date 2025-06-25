@@ -36,7 +36,7 @@ class CNNModel(nn.Module):
         return self.fc(x)
 
 class FusionModel(nn.Module):
-    def __init__(self, input_dim=64 + 32 + 2, num_classes=2):
+    def __init__(self, input_dim=102, num_classes=6):  # ← MATCH THESE TO TRAINED SHAPES
         super(FusionModel, self).__init__()
         self.fc1 = nn.Linear(input_dim, 64)
         self.fc2 = nn.Linear(64, num_classes)
