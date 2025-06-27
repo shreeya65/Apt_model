@@ -79,7 +79,7 @@ def predict(input_data: APTInput):
         lgb_out_tensor = torch.tensor(lgb_out_np, dtype=torch.float32)
 
         # GRU temporal input
-        temporal_input = np.array(input_data.temporal_features).reshape(1, 10, 1)
+        temporal_input = np.array(input_data.temporal_features).reshape(1, 13, 1)
         temporal_tensor = torch.tensor(temporal_input, dtype=torch.float32)
         gru_out = gru_model(temporal_tensor)
 
