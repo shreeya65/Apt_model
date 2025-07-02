@@ -26,7 +26,7 @@ class CNNModel(nn.Module):
         self.conv1 = nn.Conv1d(in_channels=1, out_channels=16, kernel_size=3)
         self.conv2 = nn.Conv1d(16, 32, kernel_size=3)
         self.pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(32, 32)  # <-- match shape from error logs
+        self.fc = nn.Linear(32, 32)
 
     def forward(self, x):
         x = torch.relu(self.conv1(x))
@@ -36,7 +36,7 @@ class CNNModel(nn.Module):
         return self.fc(x)
 
 class FusionModel(nn.Module):
-    def __init__(self, input_dim=102, num_classes=6):  # ← MATCH THESE TO TRAINED SHAPES
+    def __init__(self, input_dim=102, num_classes=6):
         super(FusionModel, self).__init__()
         self.fc1 = nn.Linear(input_dim, 64)
         self.fc2 = nn.Linear(64, num_classes)
@@ -51,28 +51,28 @@ class APTInput(BaseModel):
     stat_graph_features: List[float]
     temporal_features: List[float]
 
-# === Load Models ===
-lgb_model = joblib.load("lightgbm_model.pkl")
-
-gru_model = BiGRUModel()
-cnn_model = CNNModel()
-fusion_model = FusionModel()
-
-checkpoint = torch.load("best_model.pth", map_location=torch.device("cpu"))
-gru_model.load_state_dict(checkpoint['gru'])
-cnn_model.load_state_dict(checkpoint['cnn'])
-fusion_model.load_state_dict(checkpoint['fusion'])
-
-gru_model.eval()
-cnn_model.eval()
-fusion_model.eval()
-
 # === FastAPI App ===
 app = FastAPI()
 
 @app.post("/predict")
 def predict(input_data: APTInput):
     try:
+        # === Load models dynamically for every request ===
+        lgb_model = joblib.load("lightgbm_model.pkl")
+
+        gru_model = BiGRUModel()
+        cnn_model = CNNModel()
+        fusion_model = FusionModel()
+
+        checkpoint = torch.load("best_model.pth", map_location=torch.device("cpu"))
+        gru_model.load_state_dict(checkpoint['gru'])
+        cnn_model.load_state_dict(checkpoint['cnn'])
+        fusion_model.load_state_dict(checkpoint['fusion'])
+
+        gru_model.eval()
+        cnn_model.eval()
+        fusion_model.eval()
+
         # LightGBM static features
         stat_features = np.array(input_data.stat_graph_features).reshape(1, -1)
         lgb_out_np = lgb_model.predict_proba(stat_features)
