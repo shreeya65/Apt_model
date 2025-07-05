@@ -1,12 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
-import gc  # Add at the top with your other imports
 import numpy as np
 import torch
 import torch.nn as nn
 import joblib
 
+# Define models
 class BiGRUModel(nn.Module):
     def __init__(self, input_size=1, hidden_size=64, dropout_prob=0.3):
         super(BiGRUModel, self).__init__()
@@ -46,32 +46,33 @@ class FusionModel(nn.Module):
         x = torch.relu(self.fc1(x))
         return self.fc2(x)
 
+# Request model
 class APTInput(BaseModel):
     stat_graph_features: List[float]
     temporal_features: List[float]
 
+# App instance
 app = FastAPI()
+
+# ✅ Load models once at startup
+lgb_model = joblib.load("lightgbm_model.pkl")
+
+gru_model = BiGRUModel()
+cnn_model = CNNModel()
+fusion_model = FusionModel()
+
+checkpoint = torch.load("best_model.pth", map_location="cpu")
+gru_model.load_state_dict(checkpoint['gru'])
+cnn_model.load_state_dict(checkpoint['cnn'])
+fusion_model.load_state_dict(checkpoint['fusion'])
+
+gru_model.eval()
+cnn_model.eval()
+fusion_model.eval()
 
 @app.post("/predict")
 def predict(input_data: APTInput):
     try:
-        # Load models and checkpoint
-        lgb_model = joblib.load("lightgbm_model.pkl")
-
-        gru_model = BiGRUModel()
-        cnn_model = CNNModel()
-        fusion_model = FusionModel()
-
-        checkpoint = torch.load("best_model.pth", map_location="cpu")
-        gru_model.load_state_dict(checkpoint['gru'])
-        cnn_model.load_state_dict(checkpoint['cnn'])
-        fusion_model.load_state_dict(checkpoint['fusion'])
-
-        gru_model.eval()
-        cnn_model.eval()
-        fusion_model.eval()
-
-        # Prepare inputs
         stat_features = np.array(input_data.stat_graph_features).reshape(1, -1)
         lgb_out_np = lgb_model.predict_proba(stat_features)
         lgb_out_tensor = torch.tensor(lgb_out_np, dtype=torch.float32)
@@ -79,19 +80,13 @@ def predict(input_data: APTInput):
         temporal_input = np.array(input_data.temporal_features).reshape(1, 14, 1)
         temporal_tensor = torch.tensor(temporal_input, dtype=torch.float32)
 
-        # Forward pass
-        gru_out = gru_model(temporal_tensor)
-        cnn_input = temporal_tensor.view(1, 1, -1)
-        cnn_out = cnn_model(cnn_input)
-        output = fusion_model(gru_out, cnn_out, lgb_out_tensor)
-
-        probs = torch.softmax(output, dim=1).detach().numpy()
-        predicted_class = int(np.argmax(probs))
-
-        # Clean up memory
-        del gru_model, cnn_model, fusion_model, lgb_model
-        del gru_out, cnn_out, output, probs
-        gc.collect()
+        with torch.no_grad():
+            gru_out = gru_model(temporal_tensor)
+            cnn_input = temporal_tensor.view(1, 1, -1)
+            cnn_out = cnn_model(cnn_input)
+            output = fusion_model(gru_out, cnn_out, lgb_out_tensor)
+            probs = torch.softmax(output, dim=1).numpy()
+            predicted_class = int(np.argmax(probs))
 
         return {
             "prediction": predicted_class,
