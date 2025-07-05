@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
+import gc  # Add at the top with your other imports
 import numpy as np
 import torch
 import torch.nn as nn
@@ -54,7 +55,7 @@ app = FastAPI()
 @app.post("/predict")
 def predict(input_data: APTInput):
     try:
-        # Load models only when needed
+        # Load models and checkpoint
         lgb_model = joblib.load("lightgbm_model.pkl")
 
         gru_model = BiGRUModel()
@@ -78,13 +79,19 @@ def predict(input_data: APTInput):
         temporal_input = np.array(input_data.temporal_features).reshape(1, 14, 1)
         temporal_tensor = torch.tensor(temporal_input, dtype=torch.float32)
 
+        # Forward pass
         gru_out = gru_model(temporal_tensor)
         cnn_input = temporal_tensor.view(1, 1, -1)
         cnn_out = cnn_model(cnn_input)
-
         output = fusion_model(gru_out, cnn_out, lgb_out_tensor)
+
         probs = torch.softmax(output, dim=1).detach().numpy()
         predicted_class = int(np.argmax(probs))
+
+        # Clean up memory
+        del gru_model, cnn_model, fusion_model, lgb_model
+        del gru_out, cnn_out, output, probs
+        gc.collect()
 
         return {
             "prediction": predicted_class,
