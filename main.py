@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import joblib
 
-# ------------------- Models -------------------
+# -------- Model Classes --------
 class BiGRUModel(nn.Module):
     def __init__(self, input_size=1, hidden_size=64, dropout_prob=0.3):
         super(BiGRUModel, self).__init__()
@@ -46,22 +46,15 @@ class FusionModel(nn.Module):
         x = torch.relu(self.fc1(x))
         return self.fc2(x)
 
-# ------------------- Input Schema -------------------
+# -------- Input Schema --------
 class APTInput(BaseModel):
     stat_graph_features: List[float]
     temporal_features: List[float]
 
-# ------------------- App Init -------------------
+# -------- FastAPI App --------
 app = FastAPI()
 
-# Health check route
-@app.get("/")
-def root():
-    return {"status": "running"}
-
-# ------------------- Load Models Once -------------------
-lgb_model = joblib.load("lightgbm_model.pkl")
-
+# Load models ONCE (not in each request!)
 gru_model = BiGRUModel()
 cnn_model = CNNModel()
 fusion_model = FusionModel()
@@ -75,7 +68,12 @@ gru_model.eval()
 cnn_model.eval()
 fusion_model.eval()
 
-# ------------------- Prediction Route -------------------
+lgb_model = joblib.load("lightgbm_model.pkl")
+
+@app.get("/")
+def root():
+    return {"status": "running"}
+
 @app.post("/predict")
 def predict(input_data: APTInput):
     try:
@@ -87,20 +85,18 @@ def predict(input_data: APTInput):
         temporal_input = np.array(input_data.temporal_features).reshape(1, 14, 1)
         temporal_tensor = torch.tensor(temporal_input, dtype=torch.float32)
 
-        gru_out = gru_model(temporal_tensor)
-        cnn_input = temporal_tensor.view(1, 1, -1)
-        cnn_out = cnn_model(cnn_input)
+        # Predict
+        with torch.no_grad():
+            gru_out = gru_model(temporal_tensor)
+            cnn_out = cnn_model(temporal_tensor.view(1, 1, -1))
+            output = fusion_model(gru_out, cnn_out, lgb_out_tensor)
+            probs = torch.softmax(output, dim=1).detach().numpy()
 
-        output = fusion_model(gru_out, cnn_out, lgb_out_tensor)
-        probs = torch.softmax(output, dim=1).detach().numpy()
         predicted_class = int(np.argmax(probs))
-        confidence = float(np.max(probs))
-
         return {
             "prediction": predicted_class,
-            "confidence": confidence,
             "probabilities": probs[0].tolist()
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
