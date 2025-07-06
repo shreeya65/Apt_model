@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import joblib
 
-# Define models
+# ------------------- Models -------------------
 class BiGRUModel(nn.Module):
     def __init__(self, input_size=1, hidden_size=64, dropout_prob=0.3):
         super(BiGRUModel, self).__init__()
@@ -46,15 +46,20 @@ class FusionModel(nn.Module):
         x = torch.relu(self.fc1(x))
         return self.fc2(x)
 
-# Request model
+# ------------------- Input Schema -------------------
 class APTInput(BaseModel):
     stat_graph_features: List[float]
     temporal_features: List[float]
 
-# App instance
+# ------------------- App Init -------------------
 app = FastAPI()
 
-# ✅ Load models once at startup
+# Health check route
+@app.get("/")
+def root():
+    return {"status": "running"}
+
+# ------------------- Load Models Once -------------------
 lgb_model = joblib.load("lightgbm_model.pkl")
 
 gru_model = BiGRUModel()
@@ -70,9 +75,11 @@ gru_model.eval()
 cnn_model.eval()
 fusion_model.eval()
 
+# ------------------- Prediction Route -------------------
 @app.post("/predict")
 def predict(input_data: APTInput):
     try:
+        # Prepare inputs
         stat_features = np.array(input_data.stat_graph_features).reshape(1, -1)
         lgb_out_np = lgb_model.predict_proba(stat_features)
         lgb_out_tensor = torch.tensor(lgb_out_np, dtype=torch.float32)
@@ -80,16 +87,18 @@ def predict(input_data: APTInput):
         temporal_input = np.array(input_data.temporal_features).reshape(1, 14, 1)
         temporal_tensor = torch.tensor(temporal_input, dtype=torch.float32)
 
-        with torch.no_grad():
-            gru_out = gru_model(temporal_tensor)
-            cnn_input = temporal_tensor.view(1, 1, -1)
-            cnn_out = cnn_model(cnn_input)
-            output = fusion_model(gru_out, cnn_out, lgb_out_tensor)
-            probs = torch.softmax(output, dim=1).numpy()
-            predicted_class = int(np.argmax(probs))
+        gru_out = gru_model(temporal_tensor)
+        cnn_input = temporal_tensor.view(1, 1, -1)
+        cnn_out = cnn_model(cnn_input)
+
+        output = fusion_model(gru_out, cnn_out, lgb_out_tensor)
+        probs = torch.softmax(output, dim=1).detach().numpy()
+        predicted_class = int(np.argmax(probs))
+        confidence = float(np.max(probs))
 
         return {
             "prediction": predicted_class,
+            "confidence": confidence,
             "probabilities": probs[0].tolist()
         }
 
